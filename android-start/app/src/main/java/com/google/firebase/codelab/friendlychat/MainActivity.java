@@ -53,6 +53,7 @@ import com.google.firebase.analytics.FirebaseAnalytics;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.crash.FirebaseCrash;
+import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
@@ -195,6 +196,15 @@ public class MainActivity extends AppCompatActivity
                 mFirebaseDatabaseReference.child(MESSAGES_CHILD)) {
 
             @Override
+            protected FriendlyMessage parseSnapshot(DataSnapshot snapshot) {
+                FriendlyMessage friendlyMessage = super.parseSnapshot(snapshot);
+                if (friendlyMessage != null) {
+                    friendlyMessage.setId(snapshot.getKey());
+                }
+                return friendlyMessage;
+            }
+
+            @Override
             protected void populateViewHolder(MessageViewHolder viewHolder,
                                               FriendlyMessage friendlyMessage, int position) {
                 mProgressBar.setVisibility(ProgressBar.INVISIBLE);
@@ -210,6 +220,11 @@ public class MainActivity extends AppCompatActivity
                             .load(friendlyMessage.getPhotoUrl())
                             .into(viewHolder.messengerImageView);
                 }
+
+                // write this message to the on-device index
+                FirebaseAppIndex.getInstance().update(getMessageIndexable(friendlyMessage));
+                // log a view action on it
+                FirebaseUserActions.getInstance().end(getMessageViewAction(friendlyMessage));
             }
         };
 
@@ -234,7 +249,25 @@ public class MainActivity extends AppCompatActivity
         mMessageRecyclerView.setLayoutManager(mLinearLayoutManager);
         mMessageRecyclerView.setAdapter(mFirebaseAdapter);
     }
+    private Indexable getMessageIndexable(FriendlyMessage friendlyMessage) {
+        PersonBuilder sender = Indexables.personBuilder()
+                .setIsSelf(mUsername == friendlyMessage.getName())
+                .setName(friendlyMessage.getName())
+                .setUrl(MESSAGE_URL.concat(friendlyMessage.getId() + "/sender"));
 
+        PersonBuilder recipient = Indexables.personBuilder()
+                .setName(mUsername)
+                .setUrl(MESSAGE_URL.concat(friendlyMessage.getId() + "/recipient"));
+
+        Indexable messageToIndex = Indexables.messageBuilder()
+                .setName(friendlyMessage.getText())
+                .setUrl(MESSAGE_URL.concat(friendlyMessage.getId()))
+                .setSender(sender)
+                .setRecipient(recipient)
+                .build();
+
+        return messageToIndex;
+    }
     @Override
     public void onStart() {
         super.onStart();
@@ -284,5 +317,11 @@ public class MainActivity extends AppCompatActivity
         // be available.
         Log.d(TAG, "onConnectionFailed:" + connectionResult);
         Toast.makeText(this, "Google Play Services error.", Toast.LENGTH_SHORT).show();
+    }
+    private Action getMessageViewAction(FriendlyMessage friendlyMessage) {
+        return new Action.Builder(Action.Builder.VIEW_ACTION)
+                .setObject(friendlyMessage.getName(), MESSAGE_URL.concat(friendlyMessage.getId()))
+                .setMetadata(new Action.Metadata.Builder().setUpload(false))
+                .build();
     }
 }
